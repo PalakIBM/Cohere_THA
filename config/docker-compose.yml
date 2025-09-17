@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cohere_chat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cohere-network
+
+  cohere-chat-api:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - API=${COHERE_API_KEY}
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/cohere_chat
+    env_file:
+      - .env
+    volumes:
+      - ../app:/app/app
+      - ../logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - cohere-network
+
+  streamlit-frontend:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://cohere-chat-api:8000
+    volumes:
+      - ../frontend:/app/frontend
+    restart: unless-stopped
+    depends_on:
+      cohere-chat-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - cohere-network
+
+volumes:
+  postgres_data:
+
+networks:
+  cohere-network:
+    driver: bridge
